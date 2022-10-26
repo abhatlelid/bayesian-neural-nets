@@ -30,11 +30,7 @@ def custom_loss(output, target, Q_m, sigma2_eps, l2_lambda, model, G):
     GPsi = multi_dot([output, torch.transpose(G, 0, 1)])
     print(GPsi.shape)
     print(target.shape)
-    print()
-    print(GPsi.dtype)
-    print(target.dtype)
     exit()
-
 
     # Data loss
     squared_error = torch.square(GPsi - target)
@@ -62,7 +58,7 @@ def custom_loss(output, target, Q_m, sigma2_eps, l2_lambda, model, G):
 
 
 if __name__ == "__main__":
-    batch_size = 1
+    batch_size = 10
     n_batches = 100
     N = batch_size*n_batches
 
@@ -105,7 +101,7 @@ if __name__ == "__main__":
 
     print('Finished Training')
     time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    name = "../saved_models/model_weights_" + time + ".pth"
+    name = "../saved_models/fixed_position/model_weights_" + time + ".pth"
     torch.save(model.state_dict(), name)
 
     # Constructing example to plot when finished

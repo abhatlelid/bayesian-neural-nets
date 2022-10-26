@@ -1,3 +1,4 @@
+
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils import clip_grad_norm_
@@ -12,7 +13,7 @@ import sys
 sys.path.append("..")
 from scripts.data_example_mask import get_sample_and_variables, get_input_tensor, get_posteior
 from utils.model_mask import Net_mask
-import scripts.data_example as de
+import scripts.data_example_mask as de
 
 
 class Data(Dataset):
@@ -39,6 +40,12 @@ def custom_loss(output, input_, Q_m, sigma2_eps, l2_lambda, model):
     GPsi = multi_dot([output, torch.transpose(G, 0, 1)])
     Gd = multi_dot([d, torch.transpose(G, 0, 1)])
 
+def custom_loss2(output, input_, Q_m, sigma2_eps, l2_lambda, model):
+    Psi = output
+    n_param = Q_m.shape[0]
+    Gd = input_[:,:n_param]
+    mask = input_[:,n_param:]
+    GPsi = Psi*mask
 
     # Data loss
     squared_error = torch.square(GPsi - Gd)
@@ -66,34 +73,68 @@ def custom_loss(output, input_, Q_m, sigma2_eps, l2_lambda, model):
 
 
 if __name__ == "__main__":
-    batch_size = 1
-    n_batches = 1000000
+    batch_size = 128
+    n_batches = 10000
     N = batch_size*n_batches
 
-    #data_indices, mu_m, Sigma_eps, G, mu_eps, Sigma_m, Q_m, Sigma_d, sigma2_eps = de.get_example_variables()
-    #d_sample = np.random.multivariate_normal(G@mu_m.T.flatten(), Sigma_d, size=N)
+    n_epochs = 2
 
-    combined_sample, Sigma_m, Q_m, sigma2_eps = get_sample_and_variables(N)
-
-    n_epochs = 10
     epoch_loss = np.zeros(n_epochs)
-    l2_lambda = 0.05
+    l2_lambda = 0.1
 
-    dataset = Data(combined_sample)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    
+
     model = Net_mask()
-    lr = 1
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    lr = 0.0001
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+
+    D = np.array(
+        [[1, -1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, -1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0,  1, -1, 0, 0, 0, 0, 0, 0],
+        [0, 0,  0, 1, -1, 0, 0, 0, 0, 0],
+        [0, 0,  0, 0, 1, -1, 0, 0, 0, 0],
+        [0, 0,  0, 0, 0, 1, -1, 0, 0, 0],
+        [0, 0,  0, 0, 0, 0, 1, -1, 0, 0],
+        [0, 0,  0, 0, 0, 0, 0, 1, -1, 0],
+        [0, 0,  0, 0, 0, 0, 0, 0, 1, -1],
+        [-1, 0, 0, 0, 0, 0, 0, 0, 0, 1],]
+    )
+    sigma2_eps = 0.001
+    n_param = D.shape[0]
+    Q_m = D.T@D
+    mu_m = np.zeros(n_param)
+    Q_m_modified = Q_m + np.identity(10)*0.001
+    Sigma_m = np.linalg.inv(Q_m_modified)
+    Sigma_eps = np.identity(n_param)*sigma2_eps
+    Sigma_d = Sigma_m + Sigma_eps
 
     # loop over the dataset multiple times
-    for epoch in range(n_epochs):
+    counter = 0
+    losses = []
 
+    for epoch in range(n_epochs):
+        d_sample = np.random.multivariate_normal(mu_m.flatten(), Sigma_d, size=N)
+        combined_sample = np.zeros((N, 2*n_param))
+        mask = np.zeros((N, n_param))
+        range_vector = np.zeros((N, n_param)) 
+        range_vector[:,] = np.arange((n_param))
+        n_masked = np.random.randint(n_param, size=N)
+        n_masked = n_masked.reshape((N, 1))
+        bool_vector = range_vector[:,] < n_masked
+        mask[bool_vector] = 1
+        np.random.shuffle(mask.T)
+        d_sample = d_sample*mask
+        combined_sample[:,:n_param] = d_sample
+        combined_sample[:,n_param:] = mask
+
+        data = torch.from_numpy(combined_sample)
+        data = data.type(torch.float)
         epoch_running_loss = 0
         running_loss = 0.0
-        for i, input_ in enumerate(loader, 0):
-            # get the inputs; data is a list of [inputs, labels]
-            #inputs, labels = dat
+        i_prev = 0
+        for i in range(1, N, 128):
+            input_ = data[i_prev:i,:]
+            i_prev = i
 
             # zero the parameter gradients
             optimizer.zero_grad()
@@ -101,29 +142,33 @@ if __name__ == "__main__":
             # forward + backward + optimize
             outputs = model(input_)
 
-            loss = custom_loss(outputs, input_, Q_m, sigma2_eps, l2_lambda=l2_lambda, model=model)
+            loss = custom_loss2(outputs, input_, Q_m, sigma2_eps, l2_lambda=l2_lambda, model=model)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10, norm_type=2.0, error_if_nonfinite=False)
             optimizer.step()
 
             # print statistics
             running_loss += loss.item()
-            print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
+            freq = 1000
+            if counter % freq == 0:
+                print(f'[{epoch + 1}, {counter + 1:5d}] loss: {running_loss/freq/batch_size:20.10f}')
+                losses.append(running_loss)
+                running_loss = 0.0
+            counter += 1
             epoch_running_loss += running_loss
-            running_loss = 0.0
-        epoch_loss[epoch] = epoch_running_loss
 
+        epoch_loss[epoch] = epoch_running_loss
         
 
     print('Finished Training')
 
-    print(epoch_loss)
-    plt.plot(range(n_epochs), epoch_loss)
+    plt.plot(range(len(losses)), losses)
+    plt.yscale('log',base=10)
+    plt.savefig('../saved_models_mask3/loss.pdf')
     plt.show()
 
     time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    #name = "../saved_models_mask/model_weights_" + time + ".pth"
-    name = "../saved_models_mask/model_weights_mask.pth"
+    name = "../saved_models_mask/model_weights_mask_" + time + ".pth"
     torch.save(model.state_dict(), name)
 
     # Constructing example to plot when finished
@@ -145,4 +190,5 @@ if __name__ == "__main__":
     plt.title("Analystical solution vs neural net estimate")
     plt.xlabel("m")
     plt.ylabel("m|d")
+    plt.savefig('../saved_models_mask3/plot3.pdf')
     plt.show()

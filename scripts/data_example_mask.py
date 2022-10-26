@@ -22,31 +22,14 @@ sigma2_eps = 0.001
 n_param = D.shape[0]
 Q_m = D.T@D
 mu_m = np.zeros(n_param)
-Q_m_modified = Q_m + np.identity(10)*0.0001
+Q_m_modified = Q_m + np.identity(10)*0.001
 Sigma_m = np.linalg.inv(Q_m_modified)
+Sigma_eps = np.identity(n_param)*sigma2_eps
+Sigma_d = Sigma_m + Sigma_eps
 
 
-def get_sample_and_variables(N):
-    D = np.array(
-        [[1, -1, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 1, -1, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0,  1, -1, 0, 0, 0, 0, 0, 0],
-        [0, 0,  0, 1, -1, 0, 0, 0, 0, 0],
-        [0, 0,  0, 0, 1, -1, 0, 0, 0, 0],
-        [0, 0,  0, 0, 0, 1, -1, 0, 0, 0],
-        [0, 0,  0, 0, 0, 0, 1, -1, 0, 0],
-        [0, 0,  0, 0, 0, 0, 0, 1, -1, 0],
-        [0, 0,  0, 0, 0, 0, 0, 0, 1, -1],
-        [-1, 0, 0, 0, 0, 0, 0, 0, 0, 1],]
-    )
-    sigma2_eps = 0.001
-    n_param = D.shape[0]
-    Q_m = D.T@D
-    mu_m = np.zeros(n_param)
-    Sigma_eps = np.identity(n_param)*sigma2_eps
-    Q_m_modified = Q_m + np.identity(10)*0.0001
-    Sigma_m = np.linalg.inv(Q_m_modified)
-    Sigma_d = Sigma_m + Sigma_eps
+def get_sample_and_variables(batch_size, n_batches):
+    N = batch_size*n_batches
     d_sample = np.random.multivariate_normal(mu_m.flatten(), Sigma_d, size=N)
     combined_sample = np.zeros((N, 2*n_param))
     mask = np.zeros((N, n_param))
@@ -57,6 +40,7 @@ def get_sample_and_variables(N):
     bool_vector = range_vector[:,] < n_masked
     mask[bool_vector] = 1
     np.random.shuffle(mask.T)
+    d_sample = d_sample*mask
     combined_sample[:,:n_param] = d_sample
     combined_sample[:,n_param:] = mask
 
@@ -115,4 +99,4 @@ def plot_posterior(mu_m_d, Sigma_m_d):
 
 
 if __name__ == "__main__":
-    get_sample_and_variables(N=100)
+    get_sample_and_variables(batch_size=64, n_batches=10000)
